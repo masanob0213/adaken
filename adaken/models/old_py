@@ -1,0 +1,495 @@
+from django.db import models
+from django.db.models import Q
+from django.utils import timezone
+
+
+# =========================
+# Master: Office / Actress
+# =========================
+
+class Office(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Actress(models.Model):
+    name = models.CharField(max_length=255)
+    other_name = models.CharField(max_length=255, blank=True, null=True)
+
+    image_path = models.CharField(max_length=500, blank=True, null=True)
+    explanation = models.TextField(blank=True, null=True)
+
+    office = models.ForeignKey(
+        Office,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="actresses"
+    )
+
+    birth = models.DateField(blank=True, null=True)
+
+    # 初期は文字列。将来検索したくなったら bust/waist/hip/cup 分割を推奨
+    body_size = models.CharField(max_length=100, blank=True, null=True)
+
+    debut_year = models.SmallIntegerField(blank=True, null=True)
+
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["name"]),
+            models.Index(fields=["is_active"]),
+            models.Index(fields=["debut_year"]),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+# =========================
+# Master: Maker / Label / Series
+# =========================
+
+class Maker(models.Model):
+    name = models.CharField(max_length=255, unique=True)
+    alias = models.CharField(max_length=255, blank=True, null=True)
+
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+
+class Label(models.Model):
+    """
+    事業構造上は Maker 配下が自然。
+    必須にしたいなら maker を null=False に変更してください。
+    """
+    maker = models.ForeignKey(
+        Maker,
+        on_delete=models.CASCADE,
+        related_name="labels"
+    )
+
+    name = models.CharField(max_length=255)
+    alias = models.CharField(max_length=255, blank=True, null=True)
+
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["maker", "name"],
+                name="uniq_label_manufacturer_name"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["maker", "name"]),
+            models.Index(fields=["is_active"]),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class Series(models.Model):
+    # シリーズはレーベル不明もあり得るので NULL 可でスタート（必要なら NOT NULL に）
+    label = models.ForeignKey(
+        Label,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="series"
+    )
+
+    name = models.CharField(max_length=255)
+    alias = models.CharField(max_length=255, blank=True, null=True)
+
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["name"]),
+            models.Index(fields=["is_active"]),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+# =========================
+# Work (Video)
+# =========================
+
+class Work(models.Model):
+    name = models.CharField(max_length=255)
+
+    maker = models.ForeignKey(
+        Maker,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="works"
+    )
+    label = models.ForeignKey(
+        Label,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="works"
+    )
+    series = models.ForeignKey(
+        Series,
+        on_delete=models.SET_NULL,
+        blank=True,
+        null=True,
+        related_name="works"
+    )
+
+    product_number = models.CharField(max_length=64)
+    sale_date = models.DateField(blank=True, null=True)
+
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["product_number"]),
+            models.Index(fields=["sale_date"]),
+            models.Index(fields=["is_active"]),
+        ]
+        # 品番ユニークの方針が固まったら制約を追加（例：メーカー×品番）
+        # constraints = [
+        #     models.UniqueConstraint(fields=["maker", "product_number"], name="uniq_work_manufacturer_product")
+        # ]
+
+    def __str__(self):
+        return self.name
+
+
+# =========================
+# Many-to-many: Work x Actress
+# =========================
+
+class WorkActress(models.Model):
+    work = models.ForeignKey(
+        Work,
+        on_delete=models.CASCADE,
+        related_name="actress_relations"
+    )
+    actress = models.ForeignKey(
+        Actress,
+        on_delete=models.CASCADE,
+        related_name="work_relations"
+    )
+
+    sort_order = models.IntegerField(default=0)
+    is_main = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["work", "actress"], name="uniq_work_actress")
+        ]
+        indexes = [
+            models.Index(fields=["work", "sort_order"]),
+            models.Index(fields=["actress"]),
+        ]
+
+    def __str__(self):
+        return f"{self.work_id} - {self.actress_id}"
+
+
+# =========================
+# Genres: Category / Major / Medium
+# =========================
+
+class Category(models.Model):
+    name = models.CharField(max_length=100)
+    slug = models.SlugField(max_length=100, unique=True)
+
+    sort_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=["sort_order"]),
+            models.Index(fields=["is_active"]),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class MajorGenre(models.Model):
+    category = models.ForeignKey(
+        Category,
+        on_delete=models.CASCADE,
+        related_name="major_genres"
+    )
+
+    name = models.CharField(max_length=100)
+
+    # 「中ジャンル必須」フラグ
+    is_must_medium = models.BooleanField(default=False)
+
+    sort_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["category", "name"],
+                name="uniq_major_genre_category_name"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["category", "sort_order"]),
+            models.Index(fields=["is_active"]),
+        ]
+
+    def __str__(self):
+        return f"{self.category.name} - {self.name}"
+
+
+class MediumGenre(models.Model):
+    major_genre = models.ForeignKey(
+        MajorGenre,
+        on_delete=models.CASCADE,
+        related_name="medium_genres"
+    )
+
+    name = models.CharField(max_length=100)
+
+    sort_order = models.IntegerField(default=0)
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["major_genre", "name"],
+                name="uniq_medium_major_name"
+            )
+        ]
+        indexes = [
+            models.Index(fields=["major_genre", "sort_order"]),
+            models.Index(fields=["is_active"]),
+        ]
+
+    def __str__(self):
+        return f"{self.major_genre.name} - {self.name}"
+
+
+# =========================
+# Confirmed: Work x Genre (2-row policy)
+# =========================
+
+class VideoGenre(models.Model):
+    """
+    2行運用：
+    - 大ジャンル行: medium_genre=NULL
+    - 中ジャンル行: medium_genre!=NULL (majorはmediumから自動整合)
+    """
+    video = models.ForeignKey(
+        Work,
+        on_delete=models.CASCADE,
+        related_name="genre_relations",
+    )
+
+    major_genre = models.ForeignKey(
+        MajorGenre,
+        on_delete=models.CASCADE,
+        related_name="video_relations",
+    )
+
+    medium_genre = models.ForeignKey(
+        MediumGenre,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="video_relations",
+    )
+
+    assigned_by = models.CharField(max_length=20, default="admin")
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            # 大ジャンル行の重複禁止
+            models.UniqueConstraint(
+                fields=["video", "major_genre"],
+                condition=Q(medium_genre__isnull=True),
+                name="uniq_videogenre_major_row"
+            ),
+            # 中ジャンル行の重複禁止
+            models.UniqueConstraint(
+                fields=["video", "medium_genre"],
+                condition=Q(medium_genre__isnull=False),
+                name="uniq_videogenre_medium_row"
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["major_genre", "video"]),
+            models.Index(fields=["medium_genre", "video"]),
+            models.Index(fields=["video"]),
+        ]
+
+    def save(self, *args, **kwargs):
+        # mediumがあるなら major を揃える（入力事故防止）
+        if self.medium_genre_id:
+            self.major_genre_id = self.medium_genre.major_genre_id
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.video_id} - {self.major_genre_id} - {self.medium_genre_id}"
+
+
+# =========================
+# Votes: Add / Delete (anonymous count-based)
+# =========================
+
+THRESHOLD_VIDEO_GENRE_VOTES = 10
+
+
+class VoteVideoGenreAdd(models.Model):
+    """
+    ジャンル追加提案（匿名・count集計）
+    - medium=NULL の大ジャンル提案も許可（ただし is_must_medium=true は弾く）
+    """
+    video = models.ForeignKey(
+        Work,
+        on_delete=models.CASCADE,
+        related_name="genre_add_vote_relations"
+    )
+    major_genre = models.ForeignKey(
+        MajorGenre,
+        on_delete=models.CASCADE,
+        related_name="video_add_vote_relations"
+    )
+    medium_genre = models.ForeignKey(
+        MediumGenre,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="video_add_vote_relations"
+    )
+
+    count = models.IntegerField(default=0)
+    complete_flg = models.BooleanField(default=False)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["video", "major_genre"],
+                condition=Q(medium_genre__isnull=True),
+                name="uniq_addvote_video_major_when_medium_null",
+            ),
+            models.UniqueConstraint(
+                fields=["video", "medium_genre"],
+                condition=Q(medium_genre__isnull=False),
+                name="uniq_addvote_video_medium_when_medium_not_null",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["complete_flg", "count"]),
+            models.Index(fields=["video"]),
+            models.Index(fields=["major_genre"]),
+            models.Index(fields=["medium_genre"]),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.medium_genre_id:
+            self.major_genre_id = self.medium_genre.major_genre_id
+        super().save(*args, **kwargs)
+
+
+class VoteVideoGenreDelete(models.Model):
+    """
+    ジャンル削除提案（匿名・count集計）
+    - major削除（medium=NULL）が確定したら、major行＋配下medium行も全削除（あなたのルール2）
+    """
+    video = models.ForeignKey(
+        Work,
+        on_delete=models.CASCADE,
+        related_name="genre_delete_vote_relations"
+    )
+    major_genre = models.ForeignKey(
+        MajorGenre,
+        on_delete=models.CASCADE,
+        related_name="video_delete_vote_relations"
+    )
+    medium_genre = models.ForeignKey(
+        MediumGenre,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="video_delete_vote_relations"
+    )
+
+    count = models.IntegerField(default=0)
+    complete_flg = models.BooleanField(default=False)
+    completed_at = models.DateTimeField(null=True, blank=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["video", "major_genre"],
+                condition=Q(medium_genre__isnull=True),
+                name="uniq_delvote_video_major_when_medium_null",
+            ),
+            models.UniqueConstraint(
+                fields=["video", "medium_genre"],
+                condition=Q(medium_genre__isnull=False),
+                name="uniq_delvote_video_medium_when_medium_not_null",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["complete_flg", "count"]),
+            models.Index(fields=["video"]),
+            models.Index(fields=["major_genre"]),
+            models.Index(fields=["medium_genre"]),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.medium_genre_id:
+            self.major_genre_id = self.medium_genre.major_genre_id
+        super().save(*args, **kwargs)
