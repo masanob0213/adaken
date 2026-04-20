@@ -1,6 +1,7 @@
-from django.urls import path
-from .views import SampleAPIView
+from rest_framework.routers import DefaultRouter
+from .views import WorkViewSet
 
-urlpatterns = [
-    path("sample/", SampleAPIView.as_view(), name="sample"),
-]
+router = DefaultRouter()
+router.register("works", WorkViewSet, basename="work")
+
+urlpatterns = router.urls
