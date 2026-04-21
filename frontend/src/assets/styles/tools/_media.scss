@@ -1,9 +1,0 @@
-@use "../tokens" as t;
-
-@mixin up($bp) {
-  @media (min-width: $bp) { @content; }
-}
-
-@mixin sm { @include up(t.$bp-sm) { @content; } }
-@mixin md { @include up(t.$bp-md) { @content; } }
-@mixin lg { @include up(t.$bp-lg) { @content; } }
