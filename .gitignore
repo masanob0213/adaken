@@ -1,3 +1,4 @@
-./frontend/.env
-./exports/
-./env
+/frontend/.env
+/exports/
+.env
+.DS_Store
